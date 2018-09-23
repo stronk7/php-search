@@ -1,0 +1,287 @@
+#!/usr/bin/env php
+<?php
+
+foreach ([__DIR__ . '/../../../autoload.php', __DIR__ . '/../vendor/autoload.php'] as $file) {
+    if (file_exists($file)) {
+        require $file;
+        break;
+    }
+}
+
+use PhpParser\Dumper;
+use PhpParser\Error;
+use PhpParser\NodeVisitor\NameResolver;
+use PhpParser\Node;
+use PhpParser\NodeDumper;
+use PhpParser\NodeTraverser;
+use PhpParser\NodeVisitorAbstract;
+use PhpParser\ParserFactory;
+
+list($operations, $files, $attributes) = parseArgs($argv);
+$fileCount = 0;
+$totalCount = 0;
+$startTime = microtime(true);
+
+foreach ($files as $file) {
+    $fileCount++;
+    $matchesCount = 0;
+    if (strpos($file, "<?php") === 0) {
+        $code = $file;
+        echo "====> Code $code\n";
+    } else {
+        if (!file_exists($file)) {
+            die("File $file does not exist.\n");
+        }
+
+        $code = file_get_contents($file);
+        echo "====> File $file\n";
+    }
+
+    $parser = (new ParserFactory)->create(ParserFactory::PREFER_PHP7);
+    try {
+        $ast = $parser->parse($code);
+    } catch (Error $error) {
+        die("Parse error: {$error->getMessage()}\n");
+    }
+
+    // Go for complete namespaces.
+    $nameTraverser = new NodeTraverser();
+    $nameTraverser->addVisitor(new NameResolver);
+    $ast = $nameTraverser->traverse($ast);
+
+    foreach ($operations as $operation => $value) {
+        if ('dump' === $operation) {
+            dumpAST($ast, $attributes);
+        } else if ('expression' === $operation) {
+            $matchesCount = findExpression($ast, $value);
+            echo "<==== {$matchesCount} matches found\n\n";
+        }
+    }
+    $totalCount += $matchesCount;
+}
+echo "{$totalCount} matches ({$fileCount} files)\n";
+$duration = microtime(true) - $startTime;
+$memory = memory_get_peak_usage() / (1024 * 1024);
+echo round($duration, 1) . "s (" . round($memory, 1) . "Mb)\n";
+
+function findExpression($ast, $expression) {
+
+    $findNodes = parseExpression($expression);
+
+    $traverser = new NodeTraverser;
+    $visitor = new class extends NodeVisitorAbstract {
+        private $stack;
+        private $findNodes;
+        private $countMatches;
+
+        public function beforeTraverse(array $nodes) {
+            $this->stack = [];
+            $this->countMatches = 0;
+        }
+
+        public function enterNode(Node $node) {
+            if (!empty($this->stack)) {
+                $node->setAttribute('parent', $this->stack[count($this->stack)-1]);
+            }
+            $this->stack[] = $node;
+        }
+
+        public function leaveNode(Node $node) {
+            array_pop($this->stack);
+            $findNodes = $this->findNodes;
+            $out = '';
+            if ($this->findAnyNode($node, $findNodes[0])) {
+                $out .= str_pad("#" . $node->getLine(), 7, " ", STR_PAD_LEFT) . " " . get_class($node) . " found.\n";
+                array_shift($findNodes);
+                if ($findNodes) {
+                    $parent = end($this->stack);
+                    do {
+                        if ($this->findAnyNode($parent, $findNodes[0])) {
+                            $out .= str_pad("#" . $parent->getLine(), 7, " ", STR_PAD_LEFT) . " " .  get_class($parent) . "found.\n";
+                            array_shift($findNodes);
+                        }
+                    } while ($parent = prev($this->stack) and $findNodes);
+                    $out .= "\n";
+                }
+                if (!$findNodes) {
+                    echo $out;
+                    $this->countMatches++;
+                }
+            }
+        }
+
+        public function getCountMatches() {
+            return $this->countMatches;
+        }
+
+        public function setFindNodes($findNodes) {
+            $this->findNodes = $findNodes;
+        }
+
+        protected function findAnyNode($node, $findNodes) {
+            foreach ($findNodes as $findNode) {
+                if (is_string($findNode)) {
+                    if ($node instanceof $findNode) {
+                        return $node;
+                    }
+                } else if (is_array($findNode)) {
+                    if ($node instanceof $findNode[0]) {
+                        if ($node->name == $findNode[2]) {
+                            return $node;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+    };
+
+    $visitor->setFindNodes($findNodes);
+    $traverser->addVisitor($visitor);
+    $ast = $traverser->traverse($ast);
+    return $visitor->getCountMatches();
+}
+
+function parseExpression($expression) {
+    $parsednodes = [];
+    $nodes = array_reverse(array_map('trim', explode('/', $expression)));
+    foreach ($nodes as $key => $node) {
+        // Expand 'loop' to all possible loops.
+        if ('loop' === $node) {
+            $node = 'for|foreach|while|do';
+        }
+        // Support logical ORed patterns.
+        $ornodes = array_map('trim', explode('|', $node));
+        foreach ($ornodes as $orkey => $ornode) {
+            if (strpos($ornode, '()') === false) {
+                // PHP statement.
+                $parsednodes[$key][$orkey] = '\PhpParser\Node\Stmt\\' . ucfirst($ornode) . '_';
+            } else {
+                // Function or method.
+                if (strpos($ornode, '->') !== false) {
+                    // Dynamic method call.
+                    $parts = explode('->', $ornode);
+                    $parsednodes[$key][$orkey] = array('\PhpParser\Node\Expr\MethodCall', $parts[0], str_replace('()', '', $parts[1]));
+                } else if (strpos($ornode, '::') !== false) {
+                    // Static method call.
+                    $parts = explode('::', $ornode);
+                    $parsednodes[$key][$orkey] = array('\PhpParser\Node\Expr\StaticCall', $parts[0], str_replace('()', '', $parts[1]));
+                } else {
+                    // Global scope function.
+                    $parsednodes[$key][$orkey] = array('\PhpParser\Node\Expr\FuncCall', '', str_replace('()', '', $ornode));
+                }
+            }
+        }
+    }
+    return $parsednodes;
+}
+
+function dumpAST($ast, $attributes) {
+    $dumper = new NodeDumper([
+        'dumpComments' => $attributes['with-comments'],
+        'dumpPositions' => $attributes['with-positions'],
+    ]);
+    echo $dumper->dump($ast) . "\n";
+}
+
+function parseArgs($args) {
+        $operations = [];
+        $files = [];
+    $attributes = [
+        'with-positions' => false,
+        'with-comments' => false,
+        'pref3' => false,
+    ];
+
+    array_shift($args);
+    $parseOptions = true;
+    $afterExpression = false;
+    foreach ($args as $arg) {
+        if (!$parseOptions) {
+            $files[] = $arg;
+            continue;
+        }
+
+        switch ($arg) {
+            case '--dump':
+            case '-d':
+                $operations['dump'] = true;
+                break;
+            case '--expression':
+            case '-e':
+                $operations['expression'] = true;
+                $afterExpression = true;
+                break;
+            case '--with-comments':
+            case '-C';
+                $attributes['with-comments'] = true;
+                break;
+            case '--with-positions':
+            case '-P';
+                $attributes['with-positions'] = true;
+                break;
+            case '--help':
+            case '-h';
+                showHelp();
+                break;
+            case '--':
+                $parseOptions = false;
+                break;
+            default:
+                if ($arg[0] === '-') {
+                    showHelp("Invalid operation $arg.");
+                } else if ($afterExpression) {
+                    $operations['expression'] = $arg;
+                    $afterExpression = false;
+                } else {
+                    $files[] = $arg;
+                }
+        }
+    }
+
+    return [$operations, $files, $attributes];
+}
+
+function showHelp($error = '') {
+    if ($error) {
+        echo $error . "\n\n";
+    }
+    die(<<<OUTPUT
+Usage: php-search [operations] file1.php [file2.php ...]
+   or: php-search [operations] "<?php code"
+Perform some accurate PHP searches using AST structures generated by php-parser.
+
+Operations is a list of the following options:
+
+    -e, --expression        Expression defining the search within the AST. Supports:
+                                - statements (if, continue, foreach...).
+                                - "loop" as equivalent of for|foreach|do|while
+                                - functions and method calls specifying ().
+                                - object (->) and class (::) method calls.
+                                - / separator for nested searching.
+                                - | separator for logical OR searching.
+    -d, --dump              Dump AST nodes using NodeDumper.
+    -C, --with-comments     Show comments/phpdocs in AST node dumps.
+    -P, --with-positions    Show positions in AST node dumps.
+
+    -h, --help              Display this page.
+
+Examples:
+    php-search -e 'switch / case / continue' *.php
+        Search for all continue ocurrences within switch and case statements.
+
+    php-search -e 'loop / \->get_recordset()|\->get_records()' file.php
+        Search for all the calls to get_recordset() OR get_records() methods
+        within a loop (loop expands to for|foreach|while|do).
+
+    grep|ag -lr 'xxxx' * | xargs php-search -e 'something / complex / xxxx'
+        Tip: When there are many files it's recommended to reduce them by name (find)
+        or contents (grep, ag...) in order to pass to php-search a reduced list.
+
+    php-search -d -C -P file.php
+        Dumps AST nodes, with comments and positions from file.php.
+
+OUTPUT
+    );
+}
+
