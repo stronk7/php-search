@@ -21,20 +21,22 @@ list($operations, $files, $attributes) = parseArgs($argv);
 $fileCount = 0;
 $totalCount = 0;
 $startTime = microtime(true);
+// TODO: move all this to a printer.
+$isATty = function_exists('posix_isatty') ? posix_isatty(STDOUT) : true;
 
 foreach ($files as $file) {
     $fileCount++;
     $matchesCount = 0;
     if (strpos($file, "<?php") === 0) {
         $code = $file;
-        echo "====> Code $code\n";
+        $file = '';
+        echo "====> Code $code\n\n";
     } else {
         if (!file_exists($file)) {
             die("File $file does not exist.\n");
         }
 
         $code = file_get_contents($file);
-        echo "====> File $file\n";
     }
 
     $parser = (new ParserFactory)->create(ParserFactory::PREFER_PHP7);
@@ -53,23 +55,26 @@ foreach ($files as $file) {
         if ('dump' === $operation) {
             dumpAST($ast, $attributes);
         } else if ('expression' === $operation) {
-            $matchesCount = findExpression($ast, $value);
-            echo "<==== {$matchesCount} matches found\n\n";
+            $matchesCount = findExpression($ast, $value, $file, $isATty);
         }
     }
     $totalCount += $matchesCount;
 }
-echo "{$totalCount} matches ({$fileCount} files)\n";
-$duration = microtime(true) - $startTime;
-$memory = memory_get_peak_usage() / (1024 * 1024);
-echo round($duration, 1) . "s (" . round($memory, 1) . "Mb)\n";
+if ($isATty) {
+    echo "{$totalCount} matches ({$fileCount} files)\n";
+    $duration = microtime(true) - $startTime;
+    $memory = memory_get_peak_usage() / (1024 * 1024);
+    echo round($duration, 1) . "s (" . round($memory, 1) . "Mb)\n";
+}
 
-function findExpression($ast, $expression) {
+function findExpression($ast, $expression, $file = '', $isATty = true) {
 
     $findNodes = parseExpression($expression);
 
     $traverser = new NodeTraverser;
     $visitor = new class extends NodeVisitorAbstract {
+        private $file;
+        private $isATty;
         private $stack;
         private $findNodes;
         private $countMatches;
@@ -77,6 +82,15 @@ function findExpression($ast, $expression) {
         public function beforeTraverse(array $nodes) {
             $this->stack = [];
             $this->countMatches = 0;
+            if ($this->file and $this->isATty) {
+                 echo "====> File {$this->file}\n";
+            }
+        }
+
+        public function afterTraverse(array $nodes) {
+            if ($this->file and $this->isATty) {
+                echo "<==== {$this->countMatches} matches found\n\n";
+            }
         }
 
         public function enterNode(Node $node) {
@@ -91,17 +105,27 @@ function findExpression($ast, $expression) {
             $findNodes = $this->findNodes;
             $out = '';
             if ($this->findAnyNode($node, $findNodes[0])) {
-                $out .= str_pad("#" . $node->getLine(), 7, " ", STR_PAD_LEFT) . " " . get_class($node) . " found.\n";
+                if ($this->file and $this->isATty) {
+                    $out .= str_pad($node->getLine(), 7, " ", STR_PAD_LEFT) . ':' . get_class($node) . " found.\n";
+                } else {
+                    $out .= $this->file . ':' . $node->getLine() . ':' . get_class($node) . " found.\n";
+                }
                 array_shift($findNodes);
                 if ($findNodes) {
                     $parent = end($this->stack);
                     do {
                         if ($this->findAnyNode($parent, $findNodes[0])) {
-                            $out .= str_pad("#" . $parent->getLine(), 7, " ", STR_PAD_LEFT) . " " .  get_class($parent) . "found.\n";
+                            if ($this->file and $this->isATty) {
+                                $out .= str_pad($parent->getLine(), 7, " ", STR_PAD_LEFT) . ':' .  get_class($parent) . "found.\n";
+                            } else {
+                                $out .= $this->file . ':' . $parent->getLine() . ':' . get_class($parent) . " found.\n";
+                            }
                             array_shift($findNodes);
                         }
                     } while ($parent = prev($this->stack) and $findNodes);
-                    $out .= "\n";
+                    if ($this->file and $this->isATty) {
+                        $out .= "\n";
+                    }
                 }
                 if (!$findNodes) {
                     echo $out;
@@ -110,12 +134,20 @@ function findExpression($ast, $expression) {
             }
         }
 
-        public function getCountMatches() {
-            return $this->countMatches;
-        }
-
         public function setFindNodes($findNodes) {
             $this->findNodes = $findNodes;
+        }
+
+        public function setFile($file) {
+            $this->file = $file;
+        }
+
+        public function setIsATty($isATty) {
+            $this->isATty = $isATty;
+        }
+
+        public function getCountMatches() {
+            return $this->countMatches;
         }
 
         protected function findAnyNode($node, $findNodes) {
@@ -136,6 +168,8 @@ function findExpression($ast, $expression) {
         }
     };
 
+    $visitor->setFile($file);
+    $visitor->setIsATty($isATty);
     $visitor->setFindNodes($findNodes);
     $traverser->addVisitor($visitor);
     $ast = $traverser->traverse($ast);
