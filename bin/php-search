@@ -118,7 +118,8 @@ function findExpression($ast, $expression, $file = '', $isATty = true) {
                             if ($this->file and $this->isATty) {
                                 $out .= str_pad($parent->getLine(), 7, " ", STR_PAD_LEFT) . ':' .  get_class($parent) . "found.\n";
                             } else {
-                                $out .= $this->file . ':' . $parent->getLine() . ':' . get_class($parent) . " found.\n";
+                                // Scripting mode, only output inner match, so commented out.
+                                // $out .= $this->file . ':' . $parent->getLine() . ':' . get_class($parent) . " found.\n";
                             }
                             array_shift($findNodes);
                         }
@@ -311,6 +312,10 @@ Examples:
     grep|ag -lr 'xxxx' * | xargs php-search -e 'something / complex / xxxx'
         Tip: When there are many files it's recommended to reduce them by name (find)
         or contents (grep, ag...) in order to pass to php-search a reduced list.
+
+    php-search -e 'something()' *.php | xargs do_something
+        Search for all the calls to something() returning 1-line matches
+        (like grep, ag...) for easier post-process.
 
     php-search -d -C -P file.php
         Dumps AST nodes, with comments and positions from file.php.
