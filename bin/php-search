@@ -43,7 +43,8 @@ foreach ($files as $file) {
     try {
         $ast = $parser->parse($code);
     } catch (Error $error) {
-        die("Parse error: {$error->getMessage()}\n");
+        fwrite(STDERR, "Parse error: {$error->getMessage()}\n");
+        exit(1);
     }
 
     // Go for complete namespaces.
@@ -190,7 +191,24 @@ function parseExpression($expression) {
         foreach ($ornodes as $orkey => $ornode) {
             if (strpos($ornode, '()') === false) {
                 // PHP statement.
-                $parsednodes[$key][$orkey] = '\PhpParser\Node\Stmt\\' . ucfirst($ornode) . '_';
+                $parsednodes[$key][$orkey] = '\PhpParser\Node\Stmt\\' . ucfirst($ornode);
+                // PHP statement with _.
+                if (!class_exists($parsednodes[$key][$orkey])) {
+                    $parsednodes[$key][$orkey] = '\PhpParser\Node\Stmt\\' . ucfirst($ornode) . '_';
+                }
+                // PHP expression.
+                if (!class_exists($parsednodes[$key][$orkey])) {
+                    $parsednodes[$key][$orkey] = '\PhpParser\Node\Expr\\' . ucfirst($ornode);
+                }
+                // PHP expression with _.
+                if (!class_exists($parsednodes[$key][$orkey])) {
+                    $parsednodes[$key][$orkey] = '\PhpParser\Node\Expr\\' . ucfirst($ornode) . '_';
+                }
+                if (!class_exists($parsednodes[$key][$orkey])) {
+                    fwrite(STDERR, "Parse error: '{$ornode}' keyword unknown, use the -k option to show all the available keywords.\n");
+                    exit(1);
+                    // TODO: Implement the -k (--keywords) option to show all the available keywords.
+                }
             } else {
                 // Function or method.
                 if (strpos($ornode, '->') !== false) {
