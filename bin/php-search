@@ -117,7 +117,7 @@ function findExpression($ast, $expression, $file = '', $isATty = true) {
                     do {
                         if ($this->findAnyNode($parent, $findNodes[0])) {
                             if ($this->file and $this->isATty) {
-                                $out .= str_pad($parent->getLine(), 7, " ", STR_PAD_LEFT) . ':' .  get_class($parent) . "found.\n";
+                                $out .= str_pad($parent->getLine(), 7, " ", STR_PAD_LEFT) . ':' .  get_class($parent) . " found.\n";
                             } else {
                                 // Scripting mode, only output inner match, so commented out.
                                 // $out .= $this->file . ':' . $parent->getLine() . ':' . get_class($parent) . " found.\n";
