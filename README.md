@@ -15,8 +15,10 @@ Operations is a list of the following options:
     -e, --expression        Expression defining the search within the AST. Supports:
                                 - statements (if, continue, foreach...).
                                 - "loop" as equivalent of for|foreach|do|while
-                                - functions and method calls specifying ().
-                                - object (->) and class (::) method calls.
+                                - functions and methods always specifying ():
+                                    - "function" for global function declarations.
+                                    - "method" for class method declarations.
+                                    - global, object (->) and class (::) method calls.
                                 - / separator for nested searching.
                                 - | separator for logical OR searching.
     -d, --dump              Dump AST nodes using NodeDumper.
@@ -32,6 +34,10 @@ Examples:
     php-search -e 'loop / \->get_recordset()|\->get_records()' file.php
         Search for all the calls to get_recordset() OR get_records() methods
         within a loop (loop expands to for|foreach|while|do).
+
+    php-search -e 'method setUp() / \->resetAfterTest()' file.php
+        Search for all the setUp() method implementations performing
+        a call to resetAfterTest().
 
     grep|ag -lr 'xxxx' * | xargs php-search -e 'something / complex / xxxx'
         Tip: When there are many files it's recommended to reduce them by name (find)
