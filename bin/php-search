@@ -186,6 +186,10 @@ function parseExpression($expression) {
         if ('loop' === $node) {
             $node = 'for|foreach|while|do';
         }
+        // Expand 'use' to both use and traituse.
+        if ('use' === $node) {
+            $node = 'use|traituse';
+        }
         // Support logical ORed patterns.
         $ornodes = array_map('trim', explode('|', $node));
         foreach ($ornodes as $orkey => $ornode) {
@@ -335,7 +339,7 @@ Operations is a list of the following options:
 
 Examples:
     php-search -e 'switch / case / continue' *.php
-        Search for all continue ocurrences within switch and case statements.
+        Search for all continue occurrences within switch and case statements.
 
     php-search -e 'loop / \->get_recordset()|\->get_records()' file.php
         Search for all the calls to get_recordset() OR get_records() methods
@@ -355,6 +359,10 @@ Examples:
 
     php-search -d -C -P file.php
         Dumps AST nodes, with comments and positions from file.php.
+
+Expansions:
+    loop: for|foreach|while|do
+    use:  use|traituse
 
 OUTPUT
     );

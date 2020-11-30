@@ -49,6 +49,10 @@ Examples:
 
     php-search -d -C -P file.php
         Dumps AST nodes, with comments and positions from file.php.
+
+Expansions:
+    loop: for|foreach|while|do
+    use:  use|traituse
 ````
 
 LICENSE
