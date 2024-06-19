@@ -1,7 +1,6 @@
 INSTALL
 -------
-* Add `"stronk7/php-search": "0.2.*"` to your `composer.json` file.
-* Run `composer update`.
+`composer require stronk7/php-search` ;-)
 
 USAGE
 -----
