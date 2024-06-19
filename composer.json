@@ -11,7 +11,7 @@
     ],
     "require": {
         "php": ">=7.0",
-        "nikic/php-parser": "^4.10"
+        "nikic/php-parser": "^4.10|^5"
     },
     "bin": ["bin/php-search"]
 }
