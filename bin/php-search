@@ -22,7 +22,9 @@ $fileCount = 0;
 $totalCount = 0;
 $startTime = microtime(true);
 // TODO: move all this to a printer.
-$isATty = function_exists('posix_isatty') ? posix_isatty(STDOUT) : true;
+$isATty = function_exists('posix_isatty') ? posix_isatty(STDOUT) : (
+    function_exists('stream_isatty') ? stream_isatty(STDOUT) : true
+);
 
 foreach ($files as $file) {
     $fileCount++;
